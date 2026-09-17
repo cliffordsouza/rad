@@ -1,0 +1,29 @@
+display_information:
+  name: Rad
+  description: Radix's social HR sidekick - celebrations & answers
+  background_color: "#065DFF"
+features:
+  bot_user:
+    display_name: Rad
+    always_online: true
+oauth_config:
+  scopes:
+    bot:
+      # Post to #social and DM people
+      - chat:write
+      - chat:write.customize
+      # Read channel lists (resolve #social) - public + private
+      - channels:read
+      - groups:read
+      # Resolve people by email (people sheet -> Slack user id) for DMs + tags
+      - users:read
+      - users:read.email
+      # Open DM conversations
+      - im:write
+settings:
+  org_deploy_enabled: false
+  socket_mode_enabled: false
+  token_rotation_enabled: false
+# NOTE: Conversational Q&A inside Slack (app_mentions:read, im:history,
+# assistant:write + event subscriptions / Socket Mode) is added at Phase 4,
+# once Rad has a reachable endpoint. Not needed for celebrations + DMs.
