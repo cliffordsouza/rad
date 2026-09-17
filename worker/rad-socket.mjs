@@ -268,26 +268,50 @@ async function askRad(question) {
 // ---------------------------------------------------------------------------
 let BOT_USER_ID = null;
 
+const THINKING_LINES = [
+  "💭 Rad is thinking...",
+  "🦦 Rad is digging through the burrow...",
+  "📚 Rad is checking the wiki...",
+];
+
 async function handle(event, { thread = false } = {}) {
   if (!event || event.bot_id || event.subtype) return;
   if (event.user && event.user === BOT_USER_ID) return;
   let text = (event.text || "").replace(/<@[^>]+>/g, "").trim();
   if (!text) return;
 
+  const target = {
+    channel: event.channel,
+    ...(thread ? { thread_ts: event.thread_ts || event.ts } : {}),
+  };
+
+  // Post an instant "thinking" placeholder, then edit it in place with the
+  // real answer once it's ready - so there's immediate feedback on slow answers.
+  let placeholder;
   try {
-    const answer = await askRad(text);
-    await web.chat.postMessage({
-      channel: event.channel,
-      text: answer,
-      ...(thread ? { thread_ts: event.thread_ts || event.ts } : {}),
+    placeholder = await web.chat.postMessage({
+      ...target,
+      text: THINKING_LINES[Math.floor(Math.random() * THINKING_LINES.length)],
     });
   } catch (e) {
+    console.error("placeholder error:", e.message);
+  }
+
+  try {
+    const answer = await askRad(text);
+    if (placeholder?.ts) {
+      await web.chat.update({ channel: placeholder.channel, ts: placeholder.ts, text: answer });
+    } else {
+      await web.chat.postMessage({ ...target, text: answer });
+    }
+  } catch (e) {
     console.error("answer error:", e.message);
-    await web.chat.postMessage({
-      channel: event.channel,
-      text: "Oof, my circuits tripped for a second. Try me again in a moment 🛠️",
-      ...(thread ? { thread_ts: event.thread_ts || event.ts } : {}),
-    });
+    const oops = "Oof, my circuits tripped for a second. Try me again in a moment 🛠️";
+    if (placeholder?.ts) {
+      await web.chat.update({ channel: placeholder.channel, ts: placeholder.ts, text: oops });
+    } else {
+      await web.chat.postMessage({ ...target, text: oops });
+    }
   }
 }
 
