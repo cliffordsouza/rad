@@ -1,10 +1,10 @@
 display_information:
-  name: Rad
+  name: RAD
   description: Radix's social HR sidekick - celebrations & answers
   background_color: "#065DFF"
 features:
   bot_user:
-    display_name: Rad
+    display_name: RAD
     always_online: true
   app_home:
     home_tab_enabled: false
