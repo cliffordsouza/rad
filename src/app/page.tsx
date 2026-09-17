@@ -92,10 +92,15 @@ export default function Home() {
         ))}
       </div>
 
-      <p style={{ color: "var(--muted)", fontSize: 12, marginTop: 20 }}>
-        Phase 1 of 5 - scaffold. Next: create the Slack app and get Rad posting to{" "}
-        {process.env.SLACK_SOCIAL_CHANNEL || "#social"}.
-      </p>
+      <a
+        href="/portal"
+        style={{
+          display: "inline-block", marginTop: 24, padding: "11px 18px", borderRadius: 10,
+          background: "var(--accent)", color: "#fff", fontWeight: 600, textDecoration: "none",
+        }}
+      >
+        Open the RAD Portal →
+      </a>
     </main>
   );
 }

@@ -24,6 +24,7 @@ import {
 import {
   startTownhall, onRate, results as townhallResults,
 } from "./townhall.mjs";
+import { adminEmails, postingEnabled, recipients as sharedRecipients } from "./shared.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -154,19 +155,9 @@ function loadPeople() {
 const PEOPLE = loadPeople();
 
 // ---------------------------------------------------------------------------
-// Roles + pulse-check plumbing
+// Roles + broadcast recipients (roles/config live in data/ via shared.mjs)
 // ---------------------------------------------------------------------------
-function parseEmails(raw) {
-  return (raw || "").split(",").map((e) => e.trim().toLowerCase()).filter(Boolean);
-}
-const ADMIN_EMAILS = parseEmails(process.env.RAD_ADMIN_EMAILS);
-const MANAGER_EMAILS = parseEmails(process.env.RAD_MANAGER_EMAILS);
-const PRIVILEGED_EMAILS = Array.from(new Set([...ADMIN_EMAILS, ...MANAGER_EMAILS]));
 const ADMIN_IDS = new Set(); // Slack user ids, resolved at boot
-
-function postingEnabled() {
-  return process.env.POSTING_ENABLED === "true";
-}
 
 async function lookupId(email) {
   try {
@@ -177,26 +168,9 @@ async function lookupId(email) {
   }
 }
 
-/**
- * Who receives a pulse check. Test-safe: only admins/managers until go-live,
- * then everyone in the people sheet.
- */
+/** Who receives a pulse / town-hall broadcast (test-safe via shared.mjs). */
 async function pulseRecipients() {
-  const people = postingEnabled()
-    ? PEOPLE
-    : PEOPLE.filter((p) => PRIVILEGED_EMAILS.includes((p.email || "").toLowerCase()));
-  // Ensure privileged users are always included in test mode, even if not in
-  // the sheet (e.g. Cliff/Minita by email).
-  const byEmail = new Map(people.map((p) => [(p.email || "").toLowerCase(), p]));
-  if (!postingEnabled()) {
-    for (const e of PRIVILEGED_EMAILS) if (!byEmail.has(e)) byEmail.set(e, { name: e.split("@")[0], email: e });
-  }
-  const out = [];
-  for (const p of byEmail.values()) {
-    const id = await lookupId(p.email);
-    if (id) out.push({ name: p.name, slackUserId: id });
-  }
-  return out;
+  return sharedRecipients(web);
 }
 
 const MN = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -459,7 +433,7 @@ async function main() {
   loadIndex();
 
   // Resolve admin Slack ids (for pulse commands).
-  for (const email of ADMIN_EMAILS) {
+  for (const email of adminEmails()) {
     const id = await lookupId(email);
     if (id) ADMIN_IDS.add(id);
   }
