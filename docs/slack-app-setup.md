@@ -23,18 +23,20 @@ to get an app approved).
 - **Basic Information** -> **Display Information** -> upload `rad-avatar.png`
   (in `assets/brand/`) as the app icon. Background colour is already Radix blue.
 
-## 5. Add Rad to #social
-- In Slack, open **#social** and type: `/invite @Rad`
-  (Rad can't post to a channel it isn't a member of.)
+## 5. Add Rad to the channels
+- In **#rad-test** (the testing channel), type: `/invite @Rad`
+- In **#social** (the go-live channel), type: `/invite @Rad`
+  (Rad can't post to a channel it isn't a member of. Until go-live, everything
+  routes to #rad-test - #social just needs Rad present, ready for launch.)
 
 ## 6. Send me
 - the **Bot User OAuth Token** (`xoxb-...`)
 - the **Signing Secret**
 - confirm the channel is exactly **#social** (or tell me the real name)
 
-Then I'll drop them into Rad's config, resolve the #social channel id, and run a
-**safe self-test**: Rad DMs a hello to the two admins (clifford@radix.email and
-minita@radix.email) only - nothing posts to #social until you explicitly say go.
+Then I'll drop them into Rad's config and run a **safe self-test in #rad-test**
+(a sample birthday/anniversary post). Nothing reaches #social until an admin
+sets POSTING_ENABLED=true at go-live.
 
 ## What this does NOT do yet
 - No messages are sent on install.

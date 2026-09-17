@@ -15,20 +15,34 @@ export function getSlack(): WebClient {
 }
 
 export const SOCIAL_CHANNEL = process.env.SLACK_SOCIAL_CHANNEL || "#social";
+export const TEST_CHANNEL = process.env.SLACK_TEST_CHANNEL || "#rad-test";
 
 /**
- * Hard go-live lock. Nothing reaches #social unless POSTING_ENABLED === "true".
- * Until an admin flips it at go-live, all public posts are suppressed and
- * celebrations are previewed to admins/managers via DM instead.
+ * Hard go-live lock. When false, celebrations route to the test channel;
+ * only when POSTING_ENABLED === "true" do they reach #social.
  */
 export function postingEnabled(): boolean {
   return process.env.POSTING_ENABLED === "true";
 }
 
+/** Where celebrations actually land right now: #social if live, else #rad-test. */
+export function celebrationChannel(): string {
+  return postingEnabled() ? SOCIAL_CHANNEL : TEST_CHANNEL;
+}
+
 /**
- * Post to the social channel. Refuses while the go-live lock is off, so a stray
- * call can never leak to #social before launch. Callers should check
- * postingEnabled() and route to previewToAdmins() when locked.
+ * Post a celebration. Routes to #social only after go-live; otherwise to
+ * #rad-test. This is the path the daily scheduler uses - it can never leak to
+ * #social while the lock is off.
+ */
+export async function postCelebration(text: string) {
+  const slack = getSlack();
+  return slack.chat.postMessage({ channel: celebrationChannel(), text });
+}
+
+/**
+ * Explicit #social post. Refuses while the go-live lock is off, so a stray call
+ * can never reach #social before launch.
  */
 export async function postToSocial(text: string) {
   if (!postingEnabled()) {
