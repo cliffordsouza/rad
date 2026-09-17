@@ -47,81 +47,87 @@ const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 // ---------------------------------------------------------------------------
 // Confluence (read-only, same scoping rules as src/lib/confluence.ts)
 // ---------------------------------------------------------------------------
-const C_BASE = process.env.CONFLUENCE_BASE_URL || "";
-const C_EMAIL = process.env.CONFLUENCE_EMAIL || "";
-const C_TOKEN = process.env.CONFLUENCE_API_TOKEN || "";
-const HARD_DENYLIST = new Set(["FINANCE", "TS"]);
-const ALLOWLIST = new Set(
-  (process.env.CONFLUENCE_SPACE_KEYS || "")
-    .split(",").map((s) => s.trim().toUpperCase()).filter(Boolean)
-);
-const cAuth = "Basic " + Buffer.from(`${C_EMAIL}:${C_TOKEN}`).toString("base64");
-const confluenceReady = Boolean(C_BASE && C_EMAIL && C_TOKEN);
-
-function htmlToText(html) {
-  return (html || "")
-    .replace(/<style[\s\S]*?<\/style>/gi, " ")
-    .replace(/<script[\s\S]*?<\/script>/gi, " ")
-    .replace(/<[^>]+>/g, " ")
-    .replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">").replace(/&#39;|&apos;/g, "'").replace(/&quot;/g, '"')
-    .replace(/\s+/g, " ").trim();
-}
-
-async function cApi(pathname) {
-  const res = await fetch(`${C_BASE}${pathname}`, {
-    headers: { Authorization: cAuth, Accept: "application/json" },
-  });
-  if (!res.ok) throw new Error(`Confluence ${res.status} on ${pathname}`);
-  return res.json();
-}
-
-let SPACE_KEYS = [];
-async function loadSpaces() {
-  if (!confluenceReady) return;
-  const keys = [];
-  let cursor = null;
-  do {
-    const qs = new URLSearchParams({ type: "global", status: "current", limit: "100" });
-    if (cursor) qs.set("cursor", cursor);
-    const page = await cApi(`/wiki/api/v2/spaces?${qs}`);
-    for (const s of page.results || []) {
-      const key = (s.key || "").toUpperCase();
-      if (HARD_DENYLIST.has(key)) continue;
-      if (ALLOWLIST.size > 0 && !ALLOWLIST.has(key)) continue;
-      keys.push(s.key);
-    }
-    const next = page._links?.next;
-    cursor = next ? new URL(next, C_BASE).searchParams.get("cursor") : null;
-  } while (cursor);
-  SPACE_KEYS = keys;
-}
-
-async function searchConfluence(query, limit = 5) {
-  if (!confluenceReady || SPACE_KEYS.length === 0) return [];
-  const spaceClause = `space in (${SPACE_KEYS.map((k) => `"${k}"`).join(",")})`;
-  const safe = query.replace(/["\\]/g, " ").trim();
-  const cql = `type = page AND ${spaceClause} AND text ~ "${safe}"`;
-  const qs = new URLSearchParams({ cql, limit: String(limit) });
-  let data;
+// Local index built by `npm run ingest` (data/confluence-index.json).
+let INDEX = { chunks: [], spaces: [], builtAt: null, pageCount: 0 };
+function loadIndex() {
+  const f = path.join(ROOT, "data", "confluence-index.json");
+  if (!fs.existsSync(f)) return;
   try {
-    data = await cApi(`/wiki/rest/api/search?${qs}`);
-  } catch {
-    return [];
+    INDEX = JSON.parse(fs.readFileSync(f, "utf8"));
+  } catch (e) {
+    console.error("failed to read confluence index:", e.message);
   }
-  const hits = [];
-  for (const r of data.results || []) {
-    if (!r.content) continue;
-    let text = "";
-    try {
-      const page = await cApi(`/wiki/api/v2/pages/${r.content.id}?body-format=storage`);
-      text = htmlToText(page.body?.storage?.value || "").slice(0, 1800);
-    } catch { /* skip body */ }
-    hits.push({
-      title: r.content.title,
-      url: r.url ? `${C_BASE}/wiki${r.url}` : `${C_BASE}/wiki`,
-      text,
+}
+
+const STOP = new Set([
+  "the","a","an","of","to","in","on","at","for","and","or","is","are","was",
+  "were","be","do","does","did","how","what","when","where","who","why","which",
+  "can","could","would","should","i","we","you","our","my","me","us","it","this",
+  "that","with","about","from","as","by","get","got","have","has","radix","please",
+]);
+function terms(s) {
+  return (s || "")
+    .toLowerCase().replace(/[^a-z0-9 ]/g, " ").split(/\s+/)
+    .filter((w) => w.length > 2 && !STOP.has(w));
+}
+
+/** Ask Claude to expand the question into wiki search terms + synonyms. */
+async function expandQuery(question) {
+  try {
+    const res = await anthropic.messages.create({
+      model: MODEL,
+      max_tokens: 150,
+      system:
+        "You expand a user's question into search keywords for a company wiki. " +
+        "Return ONLY a JSON array of 6-12 short lowercase terms (single or two words), " +
+        "including likely synonyms and the wording a wiki page would use " +
+        "(e.g. 'leave' -> 'time off', 'annual leave', 'holiday'). No prose.",
+      messages: [{ role: "user", content: question }],
     });
+    const txt = res.content.filter((b) => b.type === "text").map((b) => b.text).join(" ");
+    const m = txt.match(/\[[\s\S]*\]/);
+    if (m) {
+      const arr = JSON.parse(m[0]);
+      if (Array.isArray(arr)) return arr.map(String);
+    }
+  } catch { /* fall back to plain terms */ }
+  return [];
+}
+
+function scoreChunk(chunk, qterms) {
+  const hayTitle = chunk.title.toLowerCase();
+  const hay = (chunk.title + " " + chunk.text).toLowerCase();
+  let score = 0;
+  for (const t of qterms) {
+    const tl = t.toLowerCase();
+    if (!tl) continue;
+    let idx = 0, c = 0;
+    while ((idx = hay.indexOf(tl, idx)) !== -1) { c++; idx += tl.length; }
+    if (c > 0) score += c + (hayTitle.includes(tl) ? 4 : 0);
+  }
+  return score;
+}
+
+/** Retrieve top matching chunks from the local index (max 2 per page, 6 total). */
+function retrieve(question, expanded) {
+  if (!INDEX.chunks || INDEX.chunks.length === 0) return [];
+  const qterms = Array.from(
+    new Set([...terms(question), ...expanded.flatMap(terms), ...expanded.map((e) => e.toLowerCase())])
+  );
+  if (qterms.length === 0) return [];
+  const scored = INDEX.chunks
+    .map((ch) => ({ ch, s: scoreChunk(ch, qterms) }))
+    .filter((x) => x.s > 0)
+    .sort((a, b) => b.s - a.s);
+
+  const perPage = {};
+  const hits = [];
+  for (const { ch } of scored) {
+    perPage[ch.pageId] = perPage[ch.pageId] || 0;
+    if (perPage[ch.pageId] >= 2) continue;
+    perPage[ch.pageId]++;
+    hits.push({ title: ch.title, url: ch.url, text: ch.text });
+    if (hits.length >= 6) break;
   }
   return hits;
 }
@@ -158,20 +164,24 @@ const SYSTEM = `You are Rad, Radix's friendly social HR bot - a cheerful meerkat
 Two kinds of messages, handle them differently:
 
 1) Greetings and small talk ("hi", "how are you", "who are you", "what can you do", thanks, etc.):
-   - Reply warmly and briefly in character. Never say you lack information for these.
+   - Reply warmly and briefly in character. Never say you lack information for these, and do not add a summary/details structure.
    - If asked who you are or what you do, say you are Radix's HR sidekick: you post birthday and anniversary shout-outs, and you answer questions from Radix's Confluence pages and people data.
 
-2) Factual questions (HR policy, company info, birthdays, anniversaries):
-   - Answer ONLY from the context provided in the user's message (Radix Confluence pages + birthdays/anniversaries data).
-   - For a policy or company fact, cite the Confluence page title with its link.
-   - For birthday/anniversary questions, use the people data.
+2) Factual questions (HR policy, company info, birthdays, anniversaries) - answer in this exact shape:
+   - Line 1: a BRIEF summary answer - one or two sentences, in your own words. Apply logic and synthesise; do NOT paste raw wiki text.
+   - Then a short follow-up line that offers more, e.g.: "Want the full details? I can walk you through it, or here's the page: <link>". Include the Confluence page link(s) you used.
+   - Only expand into the longer detail if the person asks for more.
+   - Answer ONLY from the context provided in the user's message (Radix Confluence pages + birthdays/anniversaries data). For birthday/anniversary questions, use the people data.
    - Never invent names, dates, policies or facts. Do not guess.
    - If a factual answer is genuinely not in the context, reply with a light, slightly witty one-liner and then say plainly: "I don't have any information for it."
 
-Always: keep it short, at most one or two emoji, and NEVER use em dashes - use hyphens instead.`;
+Always: keep it compact, at most one or two emoji, and NEVER use em dashes - use hyphens instead.`;
 
 async function askRad(question) {
-  const [hits, ppl] = [await searchConfluence(question), peopleContext()];
+  const expanded = await expandQuery(question);
+  const hits = retrieve(question, expanded);
+  const ppl = peopleContext();
+
   const blocks = [];
   if (ppl) blocks.push(ppl);
   for (const h of hits) {
@@ -183,7 +193,7 @@ async function askRad(question) {
 
   const res = await anthropic.messages.create({
     model: MODEL,
-    max_tokens: 600,
+    max_tokens: 700,
     system: SYSTEM,
     messages: [
       { role: "user", content: `Context:\n${context}\n\nQuestion: ${question}` },
@@ -229,7 +239,8 @@ async function handle(event, { thread = false } = {}) {
 // without Slack, to confirm answers before delivery is wired.
 async function cliAsk() {
   const q = process.argv.slice(3).join(" ").trim() || "How are you?";
-  await loadSpaces();
+  loadIndex();
+  console.log(`(index: ${INDEX.chunkCount || INDEX.chunks.length || 0} chunks)`);
   console.log(`Q: ${q}\n`);
   const a = await askRad(q);
   console.log(`Rad: ${a}`);
@@ -244,9 +255,10 @@ async function main() {
   BOT_USER_ID = auth.user_id;
   console.log(`Rad worker: bot=${auth.user} team=${auth.team}`);
 
-  await loadSpaces();
+  loadIndex();
   console.log(
-    `Confluence: ${confluenceReady ? SPACE_KEYS.length + " readable spaces" : "not configured"}` +
+    `Confluence index: ${INDEX.chunks.length} chunks / ${INDEX.pageCount || "?"} pages` +
+    `${INDEX.builtAt ? ` (built ${INDEX.builtAt})` : " (MISSING - run npm run ingest)"}` +
     ` | people: ${PEOPLE.length} loaded`
   );
 

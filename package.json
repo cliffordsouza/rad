@@ -8,6 +8,7 @@
     "build": "next build",
     "start": "next start -p 3023",
     "worker": "node worker/rad-socket.mjs",
+    "ingest": "node worker/ingest-confluence.mjs",
     "lint": "next lint",
     "typecheck": "tsc --noEmit"
   },
