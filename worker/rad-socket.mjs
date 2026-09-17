@@ -18,6 +18,9 @@ import { fileURLToPath } from "node:url";
 import { SocketModeClient } from "@slack/socket-mode";
 import { WebClient } from "@slack/web-api";
 import Anthropic from "@anthropic-ai/sdk";
+import {
+  startPulse, onMood, isAwaitingComment, recordComment, results as pulseResults,
+} from "./pulse.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -147,6 +150,52 @@ function loadPeople() {
 }
 const PEOPLE = loadPeople();
 
+// ---------------------------------------------------------------------------
+// Roles + pulse-check plumbing
+// ---------------------------------------------------------------------------
+function parseEmails(raw) {
+  return (raw || "").split(",").map((e) => e.trim().toLowerCase()).filter(Boolean);
+}
+const ADMIN_EMAILS = parseEmails(process.env.RAD_ADMIN_EMAILS);
+const MANAGER_EMAILS = parseEmails(process.env.RAD_MANAGER_EMAILS);
+const PRIVILEGED_EMAILS = Array.from(new Set([...ADMIN_EMAILS, ...MANAGER_EMAILS]));
+const ADMIN_IDS = new Set(); // Slack user ids, resolved at boot
+
+function postingEnabled() {
+  return process.env.POSTING_ENABLED === "true";
+}
+
+async function lookupId(email) {
+  try {
+    const r = await web.users.lookupByEmail({ email });
+    return r.ok ? r.user.id : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Who receives a pulse check. Test-safe: only admins/managers until go-live,
+ * then everyone in the people sheet.
+ */
+async function pulseRecipients() {
+  const people = postingEnabled()
+    ? PEOPLE
+    : PEOPLE.filter((p) => PRIVILEGED_EMAILS.includes((p.email || "").toLowerCase()));
+  // Ensure privileged users are always included in test mode, even if not in
+  // the sheet (e.g. Cliff/Minita by email).
+  const byEmail = new Map(people.map((p) => [(p.email || "").toLowerCase(), p]));
+  if (!postingEnabled()) {
+    for (const e of PRIVILEGED_EMAILS) if (!byEmail.has(e)) byEmail.set(e, { name: e.split("@")[0], email: e });
+  }
+  const out = [];
+  for (const p of byEmail.values()) {
+    const id = await lookupId(p.email);
+    if (id) out.push({ name: p.name, slackUserId: id });
+  }
+  return out;
+}
+
 const MN = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
 function dubaiTodayParts() {
@@ -197,13 +246,14 @@ function peopleContext() {
 // ---------------------------------------------------------------------------
 // Rad's brain
 // ---------------------------------------------------------------------------
-const SYSTEM = `You are Rad, Radix's friendly social HR bot - a cheerful meerkat in round glasses and blue headphones. You are warm, upbeat and a little witty.
+const SYSTEM = `You are RAD, Radix's friendly social HR bot - a cheerful meerkat in round glasses and blue headphones. You are warm, upbeat and a little witty. Always write your own name in ALL CAPS as "RAD" (never "Rad" or "rad").
 
 Two kinds of messages, handle them differently:
 
 1) Greetings and small talk ("hi", "how are you", "who are you", "what can you do", thanks, etc.):
-   - Reply warmly and briefly in character. Never say you lack information for these, and do not add a summary/details structure.
-   - If asked who you are or what you do, say you are Radix's HR sidekick: you post birthday and anniversary shout-outs, and you answer questions from Radix's Confluence pages and people data.
+   - Reply warmly, briefly and CASUALLY, in character - like a friendly colleague popping by, not a corporate bio. Never the summary/details structure here, and never say you lack information for these.
+   - VARY it every single time. Do not reuse the same wording, opener, length or emoji twice - improvise a fresh, off-the-cuff line for each person. Some can be one playful sentence; some can be a touch cheeky.
+   - If asked who you are or what you can do, weave in casually (not as a checklist, not the same way twice) that you're Radix's HR sidekick - you do birthday and anniversary shout-outs and can dig answers out of the company wiki and people data. Make it sound like you said it off the top of your head, not a script.
 
 2) Factual questions (HR policy, company info, birthdays, anniversaries) - answer in this exact shape:
    - Line 1: a BRIEF one-line summary in your own words. Apply logic and synthesise; do NOT paste raw wiki text.
@@ -269,11 +319,11 @@ async function askRad(question) {
 let BOT_USER_ID = null;
 
 const THINKING_LINES = [
-  "💭 Rad is thinking...",
-  "🦦 Rad is digging through the burrow...",
-  "📚 Rad is checking the wiki...",
+  "💭 RAD is thinking...",
+  "🦦 RAD is digging through the burrow...",
+  "📚 RAD is checking the wiki...",
 ];
-const TYPING_LINE = "✍️ Rad is typing...";
+const TYPING_LINE = "✍️ RAD is typing...";
 
 /** Quick greetings / thanks / small talk -> lighter "typing" placeholder. */
 function isSmallTalk(text) {
@@ -297,11 +347,40 @@ function placeholderText(text) {
   return THINKING_LINES[Math.floor(Math.random() * THINKING_LINES.length)];
 }
 
+const PULSE_START_RE = /^(run|start|send|fire|trigger)\s+(a\s+)?pulse(\s*check)?$/i;
+const PULSE_RESULTS_RE = /^pulse\s+(results?|summary|report)$/i;
+
 async function handle(event, { thread = false } = {}) {
   if (!event || event.bot_id || event.subtype) return;
   if (event.user && event.user === BOT_USER_ID) return;
   let text = (event.text || "").replace(/<@[^>]+>/g, "").trim();
   if (!text) return;
+
+  const isDM = event.channel_type === "im" || !thread;
+
+  // 1) If this user just voted in a pulse, treat their DM as the comment.
+  if (isDM && isAwaitingComment(event.user)) {
+    await recordComment(web, event.user, text);
+    return;
+  }
+
+  // 2) Admin pulse commands (DM only).
+  if (isDM && ADMIN_IDS.has(event.user)) {
+    if (PULSE_START_RE.test(text)) {
+      const recipients = await pulseRecipients();
+      const { sent, failed } = await startPulse(web, recipients);
+      const mode = postingEnabled() ? "everyone" : "admins/managers only (test mode)";
+      let msg = `📣 Pulse check sent to *${sent}* ${sent === 1 ? "person" : "people"} - ${mode}.`;
+      if (failed.length) msg += `\nCouldn't reach: ${failed.join(", ")}`;
+      msg += `\n\nAsk me for *pulse results* any time to see the rollup.`;
+      await web.chat.postMessage({ channel: event.channel, text: msg });
+      return;
+    }
+    if (PULSE_RESULTS_RE.test(text)) {
+      await web.chat.postMessage({ channel: event.channel, text: pulseResults() });
+      return;
+    }
+  }
 
   const target = {
     channel: event.channel,
@@ -359,10 +438,17 @@ async function main() {
   console.log(`Rad worker: bot=${auth.user} team=${auth.team}`);
 
   loadIndex();
+
+  // Resolve admin Slack ids (for pulse commands).
+  for (const email of ADMIN_EMAILS) {
+    const id = await lookupId(email);
+    if (id) ADMIN_IDS.add(id);
+  }
+
   console.log(
     `Confluence index: ${INDEX.chunks.length} chunks / ${INDEX.pageCount || "?"} pages` +
     `${INDEX.builtAt ? ` (built ${INDEX.builtAt})` : " (MISSING - run npm run ingest)"}` +
-    ` | people: ${PEOPLE.length} loaded`
+    ` | people: ${PEOPLE.length} | admins: ${ADMIN_IDS.size} | posting: ${postingEnabled() ? "LIVE" : "test"}`
   );
 
   const sm = new SocketModeClient({ appToken: APP_TOKEN });
@@ -375,6 +461,18 @@ async function main() {
   sm.on("app_mention", async ({ event, ack }) => {
     await ack();
     await handle(event, { thread: true });
+  });
+
+  // Pulse-check button clicks.
+  sm.on("interactive", async ({ body, ack }) => {
+    await ack();
+    try {
+      if (body?.type === "block_actions" && body.actions?.[0]?.action_id?.startsWith("pulse_mood_")) {
+        await onMood(web, body);
+      }
+    } catch (e) {
+      console.error("interactive error:", e.message);
+    }
   });
 
   await sm.start();
