@@ -49,20 +49,30 @@ Rules:
 - Stay kind and inclusive. Never single someone out negatively.
 - You are British-spelling friendly but not fussy about it.`,
 
-  // Templates for the scheduled social posts. {name} etc. get filled in.
+  // Canonical copy for the scheduled #social posts.
+  // {mention} = Slack tag (<@U…>) if we have the user id, else the first name.
+  // {name} = full name. {years} = years of service. Keep it short and warm.
   templates: {
+    // Birthdays - everyone, every year.
     birthday: [
-      "🎂 Big happy birthday to {name} today! Wishing you a brilliant one. 🎉",
-      "🎉 It's {name}'s birthday! Everyone send some love their way today. 🥳",
-      "🎂 Cake alert: {name} is celebrating a birthday today. Have a great one, {name}!",
+      "🎂 Happy birthday, {mention}! Wishing you a brilliant day and an even better year ahead. Drop some love below 🎉",
+      "🎉 It's {mention}'s birthday today! Have an amazing one - the whole Radix crew is cheering for you 🥳",
+      "🎂 Big birthday shout to {mention}! Hope today's full of cake, good vibes and zero meetings 🎈",
     ],
+    // Standard work anniversary - any non-milestone year.
     workAnniversary: [
-      "🎊 {name} is celebrating {years} year(s) at Radix today. Thank you for everything you do!",
-      "🙌 {years} years of {name} at Radix today - what a run. Here's to many more!",
+      "🎊 Happy work anniversary, {mention}! {years} years at Radix today. Thank you for everything you bring to the team 💙",
+      "🙌 {mention} is celebrating {years} years at Radix today! Grateful to have you with us - here's to the year ahead 🎉",
     ],
+    // Milestone anniversary - big, round years (see MILESTONE_YEARS).
+    milestoneAnniversary: [
+      "🌟 Milestone alert! {mention} completes {years} years at Radix today. That's real dedication - thank you for the journey and here's to many more 🎉💙",
+      "🏆 {years} years of {mention} at Radix today! What a run. Thank you for the impact, the energy and everything in between 🎊",
+    ],
+    // New joiners (used later once we have a joiners feed).
     newJoiner: [
-      "👋 Everyone welcome {name}, who just joined Radix as {role}! Say hi. 🎉",
-      "🌟 A warm Radix welcome to our newest teammate, {name} ({role})!",
+      "👋 Everyone welcome {mention}, who just joined Radix as {role}! Say hi 🎉",
+      "🌟 A warm Radix welcome to our newest teammate, {mention} ({role})!",
     ],
   },
 
