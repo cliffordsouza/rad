@@ -212,6 +212,8 @@ Two kinds of messages, handle them differently:
    - Only expand into longer detail if the person asks for more.
    - Answer ONLY from the context provided in the user's message (Radix Confluence pages + birthdays/anniversaries data). For birthday/anniversary questions, use the people data.
    - Use the TODAY date in the context to decide what is "upcoming" or "next". Do not hedge about today's date - it is given to you.
+   - STRICT filtering: show ONLY the items that qualify. SILENTLY omit anything that does not - do not list it with a note like "(already passed)", "(not applicable)", "skipping", or "excluded". If it does not qualify, it must not appear at all.
+   - "upcoming"/"next"/"remaining"/"future" means dates strictly after TODAY - drop every date on or before TODAY entirely. If they ask for UAE/Dubai, show only UAE/Dubai items (omit Mumbai/India-only ones), and vice versa. If nothing qualifies, say so plainly in one line.
    - Never invent names, dates, policies or facts. Do not guess.
    - If a factual answer is genuinely not in the context, reply with a light, slightly witty one-liner and then say plainly: "I don't have any information for it."
 
@@ -243,8 +245,11 @@ async function askRad(question) {
 
   const res = await anthropic.messages.create({
     model: MODEL,
-    max_tokens: 700,
-    thinking: { type: "disabled" },
+    max_tokens: 2000,
+    // Adaptive thinking reasons privately (display defaults to omitted), so
+    // filtering/date logic happens off-screen and the user sees a clean answer.
+    thinking: { type: "adaptive" },
+    output_config: { effort: "high" },
     system: SYSTEM,
     messages: [
       { role: "user", content: `${todayLine}\n\nContext:\n${context}\n\nQuestion: ${question}` },
