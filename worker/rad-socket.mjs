@@ -225,7 +225,21 @@ async function handle(event, { thread = false } = {}) {
   }
 }
 
+// CLI ask-mode: `npm run worker -- --ask "your question"` - test the brain
+// without Slack, to confirm answers before delivery is wired.
+async function cliAsk() {
+  const q = process.argv.slice(3).join(" ").trim() || "How are you?";
+  await loadSpaces();
+  console.log(`Q: ${q}\n`);
+  const a = await askRad(q);
+  console.log(`Rad: ${a}`);
+}
+
 async function main() {
+  if (process.argv[2] === "--ask") {
+    await cliAsk();
+    return;
+  }
   const auth = await web.auth.test();
   BOT_USER_ID = auth.user_id;
   console.log(`Rad worker: bot=${auth.user} team=${auth.team}`);
