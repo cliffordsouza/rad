@@ -273,6 +273,29 @@ const THINKING_LINES = [
   "🦦 Rad is digging through the burrow...",
   "📚 Rad is checking the wiki...",
 ];
+const TYPING_LINE = "✍️ Rad is typing...";
+
+/** Quick greetings / thanks / small talk -> lighter "typing" placeholder. */
+function isSmallTalk(text) {
+  const s = text.toLowerCase().trim();
+  const words = s.split(/\s+/).length;
+  if (
+    /^(hi|hey|hello|yo|hiya|sup|howdy|hii+|heya)\b/.test(s) ||
+    /^(thanks|thank you|thanks rad|thx|ty|cheers|nice one|great|awesome|cool|got it|ok|okay)\b/.test(s) ||
+    /^good (morning|afternoon|evening|night)\b/.test(s) ||
+    /\bhow are you\b/.test(s) ||
+    /\bwho are you\b/.test(s) ||
+    /\bwhat can you do\b/.test(s)
+  ) {
+    return words <= 6;
+  }
+  return false;
+}
+
+function placeholderText(text) {
+  if (isSmallTalk(text)) return TYPING_LINE;
+  return THINKING_LINES[Math.floor(Math.random() * THINKING_LINES.length)];
+}
 
 async function handle(event, { thread = false } = {}) {
   if (!event || event.bot_id || event.subtype) return;
@@ -291,7 +314,7 @@ async function handle(event, { thread = false } = {}) {
   try {
     placeholder = await web.chat.postMessage({
       ...target,
-      text: THINKING_LINES[Math.floor(Math.random() * THINKING_LINES.length)],
+      text: placeholderText(text),
     });
   } catch (e) {
     console.error("placeholder error:", e.message);
