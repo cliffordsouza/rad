@@ -24,6 +24,8 @@ settings:
   org_deploy_enabled: false
   socket_mode_enabled: false
   token_rotation_enabled: false
-# NOTE: Conversational Q&A inside Slack (app_mentions:read, im:history,
-# assistant:write + event subscriptions / Socket Mode) is added at Phase 4,
-# once Rad has a reachable endpoint. Not needed for celebrations + DMs.
+# NOTE: Q&A surface = Slack "Agents & AI Apps" assistant pane (chosen).
+# It answers briefly from Rad's stored knowledge (Confluence + Drive + people
+# data). Added at Phase 4 - needs assistant:write + assistant/message events
+# pointed at Rad's deployed URL, so it is intentionally NOT in this Phase-2
+# manifest (those event settings require the live endpoint to exist first).
