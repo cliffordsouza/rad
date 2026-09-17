@@ -21,6 +21,9 @@ import Anthropic from "@anthropic-ai/sdk";
 import {
   startPulse, onMood, isAwaitingComment, recordComment, results as pulseResults,
 } from "./pulse.mjs";
+import {
+  startTownhall, onRate, results as townhallResults,
+} from "./townhall.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -349,6 +352,8 @@ function placeholderText(text) {
 
 const PULSE_START_RE = /^(run|start|send|fire|trigger)\s+(a\s+)?pulse(\s*check)?$/i;
 const PULSE_RESULTS_RE = /^pulse\s+(results?|summary|report)$/i;
+const TOWNHALL_START_RE = /^(run|start|send|fire|trigger)\s+(a\s+)?town\s*hall(\s*(survey|feedback|poll))?$/i;
+const TOWNHALL_RESULTS_RE = /^town\s*hall\s+(results?|summary|report)$/i;
 
 async function handle(event, { thread = false } = {}) {
   if (!event || event.bot_id || event.subtype) return;
@@ -378,6 +383,20 @@ async function handle(event, { thread = false } = {}) {
     }
     if (PULSE_RESULTS_RE.test(text)) {
       await web.chat.postMessage({ channel: event.channel, text: pulseResults() });
+      return;
+    }
+    if (TOWNHALL_START_RE.test(text)) {
+      const recipients = await pulseRecipients();
+      const { sent, failed } = await startTownhall(web, recipients);
+      const mode = postingEnabled() ? "everyone" : "admins/managers only (test mode)";
+      let msg = `🏛️ Town-hall survey sent to *${sent}* ${sent === 1 ? "person" : "people"} - ${mode}.`;
+      if (failed.length) msg += `\nCouldn't reach: ${failed.join(", ")}`;
+      msg += `\n\nAsk me for *town hall results* any time.`;
+      await web.chat.postMessage({ channel: event.channel, text: msg });
+      return;
+    }
+    if (TOWNHALL_RESULTS_RE.test(text)) {
+      await web.chat.postMessage({ channel: event.channel, text: townhallResults() });
       return;
     }
   }
@@ -467,9 +486,10 @@ async function main() {
   sm.on("interactive", async ({ body, ack }) => {
     await ack();
     try {
-      if (body?.type === "block_actions" && body.actions?.[0]?.action_id?.startsWith("pulse_mood_")) {
-        await onMood(web, body);
-      }
+      const actionId = body?.actions?.[0]?.action_id || "";
+      if (body?.type !== "block_actions") return;
+      if (actionId.startsWith("pulse_mood_")) await onMood(web, body);
+      else if (actionId.startsWith("th_")) await onRate(web, body);
     } catch (e) {
       console.error("interactive error:", e.message);
     }
