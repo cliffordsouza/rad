@@ -77,6 +77,7 @@ async function expandQuery(question) {
     const res = await anthropic.messages.create({
       model: MODEL,
       max_tokens: 150,
+      thinking: { type: "disabled" },
       system:
         "You expand a user's question into search keywords for a company wiki. " +
         "Return ONLY a JSON array of 6-12 short lowercase terms (single or two words), " +
@@ -146,14 +147,51 @@ function loadPeople() {
 }
 const PEOPLE = loadPeople();
 
+const MN = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+function dubaiTodayParts() {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Dubai", year: "numeric", month: "2-digit", day: "2-digit",
+  }).formatToParts(new Date());
+  const g = (t) => parseInt(parts.find((p) => p.type === t).value, 10);
+  return { year: g("year"), month: g("month"), day: g("day") };
+}
+
+/**
+ * Pre-computed people facts so the model never has to filter 95 rows itself
+ * (LLMs are unreliable at that). Groups birthdays and anniversaries by month
+ * and lists today's celebrations, all computed in code.
+ */
 function peopleContext() {
   if (PEOPLE.length === 0) return "";
-  const lines = PEOPLE.map((p) => {
-    const bd = p.dobDay && p.dobMonth ? `birthday ${p.dobDay}/${p.dobMonth}` : "birthday n/a";
-    const doj = p.dojDay ? `joined ${p.dojDay}/${p.dojMonth}/${p.dojYear}` : "joined n/a";
-    return `- ${p.name}${p.loc ? ` (${p.loc})` : ""}: ${bd}; ${doj}`;
-  });
-  return `BIRTHDAYS & ANNIVERSARIES (day/month):\n${lines.join("\n")}`;
+  const today = dubaiTodayParts();
+
+  const bdayByMonth = {};
+  const annByMonth = {};
+  const todayB = [];
+  const todayA = [];
+  for (const p of PEOPLE) {
+    (bdayByMonth[p.dobMonth] = bdayByMonth[p.dobMonth] || []).push(`${p.name} (${p.dobDay} ${MN[p.dobMonth]})`);
+    const yrs = today.year - p.dojYear;
+    (annByMonth[p.dojMonth] = annByMonth[p.dojMonth] || []).push(`${p.name} (${p.dojDay} ${MN[p.dojMonth]}, ${yrs}y)`);
+    if (p.dobMonth === today.month && p.dobDay === today.day) todayB.push(p.name);
+    if (p.dojMonth === today.month && p.dojDay === today.day && yrs > 0) todayA.push(`${p.name} (${yrs}y)`);
+  }
+
+  const section = (label, byMonth) => {
+    const rows = [];
+    for (let m = 1; m <= 12; m++) {
+      if (byMonth[m]) rows.push(`  ${MN[m]}: ${byMonth[m].join(", ")}`);
+    }
+    return `${label}:\n${rows.join("\n")}`;
+  };
+
+  return [
+    `TODAY (${today.day} ${MN[today.month]} ${today.year}, Dubai time): ` +
+      `birthdays: ${todayB.join(", ") || "none"}; anniversaries: ${todayA.join(", ") || "none"}`,
+    section("BIRTHDAYS BY MONTH (name (day))", bdayByMonth),
+    section("WORK ANNIVERSARIES BY MONTH (name (day, years so far))", annByMonth),
+  ].join("\n\n");
 }
 
 // ---------------------------------------------------------------------------
@@ -175,7 +213,8 @@ Two kinds of messages, handle them differently:
    - Never invent names, dates, policies or facts. Do not guess.
    - If a factual answer is genuinely not in the context, reply with a light, slightly witty one-liner and then say plainly: "I don't have any information for it."
 
-Always: keep it compact, at most one or two emoji, and NEVER use em dashes - use hyphens instead.`;
+Always: keep it compact, at most one or two emoji, and NEVER use em dashes - use hyphens instead.
+Give ONLY the final, clean answer. Never think out loud or narrate corrections (no "wait", "let me fix that", "actually"). For list questions, return one tidy list, sorted sensibly, with no duplicates.`;
 
 async function askRad(question) {
   const expanded = await expandQuery(question);
@@ -194,6 +233,7 @@ async function askRad(question) {
   const res = await anthropic.messages.create({
     model: MODEL,
     max_tokens: 700,
+    thinking: { type: "disabled" },
     system: SYSTEM,
     messages: [
       { role: "user", content: `Context:\n${context}\n\nQuestion: ${question}` },

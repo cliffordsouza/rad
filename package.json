@@ -10,7 +10,8 @@
     "worker": "node worker/rad-socket.mjs",
     "ingest": "node worker/ingest-confluence.mjs",
     "lint": "next lint",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "parse:people": "node worker/parse-people.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.68.0",
