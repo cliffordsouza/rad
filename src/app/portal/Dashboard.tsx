@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from "react";
 import Compose from "./Compose";
 import Sent from "./Sent";
+import AccountMenu from "./AccountMenu";
 
 type Perm = string;
 const has = (perms: Perm[], p: Perm) => perms.includes(p);
@@ -38,7 +39,7 @@ function Section({ title, right, children }: { title: string; right?: React.Reac
   );
 }
 
-export default function Dashboard({ email, role, perms }: { email: string; role: string; perms: Perm[] }) {
+export default function Dashboard({ email, role, perms, name, picture }: { email: string; role: string; perms: Perm[]; name?: string; picture?: string }) {
   const [config, setConfig] = useState<any>(null);
   const [results, setResults] = useState<any>(null);
   const [roles, setRoles] = useState<Record<string, string>>({});
@@ -110,14 +111,10 @@ export default function Dashboard({ email, role, perms }: { email: string; role:
             style={{ borderRadius: 12, boxShadow: "var(--shadow-sm)" }} />
           <div>
             <h1 style={{ margin: 0, fontSize: 22 }}>RAD Portal</h1>
-            <div style={{ color: "var(--muted)", fontSize: 13 }}>
-              {email} · <span style={{ color: "var(--accent)", fontWeight: 600 }}>{ROLE_LABEL[role] || role}</span>
-            </div>
+            <div style={{ color: "var(--muted)", fontSize: 13 }}>Notifications, polls & access</div>
           </div>
         </div>
-        <form action="/api/auth/logout" method="post">
-          <button className="rad-btn rad-btn-ghost">Sign out</button>
-        </form>
+        <AccountMenu email={email} role={role} name={name} picture={picture} />
       </div>
 
       {/* Status */}

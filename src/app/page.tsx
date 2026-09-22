@@ -1,4 +1,8 @@
+import { redirect } from "next/navigation";
+import { getUser } from "@/lib/session";
 import { RAD_PERSONA } from "@/config/persona";
+
+export const dynamic = "force-dynamic";
 
 function StatusRow({ label, ok, note }: { label: string; ok: boolean; note: string }) {
   return (
@@ -18,7 +22,10 @@ function StatusRow({ label, ok, note }: { label: string; ok: boolean; note: stri
   );
 }
 
-export default function Home() {
+export default async function Home() {
+  const user = await getUser();
+  if (!user) redirect("/login");
+
   const has = (v?: string) => Boolean(v && v.length > 0);
 
   const checks = [

@@ -37,11 +37,18 @@ function verify(token: string): string | null {
 export interface RadUser {
   email: string;
   role: RadRole;
+  name?: string;
+  picture?: string;
 }
 
-export async function setSession(email: string) {
+export async function setSession(email: string, profile: { name?: string; picture?: string } = {}) {
+  const payload = JSON.stringify({
+    email: email.trim().toLowerCase(),
+    name: profile.name || "",
+    picture: profile.picture || "",
+  });
   const jar = await cookies();
-  jar.set(COOKIE, sign(email.trim().toLowerCase()), {
+  jar.set(COOKIE, sign(payload), {
     httpOnly: true,
     sameSite: "lax",
     secure: process.env.NODE_ENV === "production",
@@ -60,11 +67,19 @@ export async function getUser(): Promise<RadUser | null> {
   const jar = await cookies();
   const token = jar.get(COOKIE)?.value;
   if (!token) return null;
-  const email = verify(token);
+  const payload = verify(token);
+  if (!payload) return null;
+  let email = "", name = "", picture = "";
+  try {
+    const p = JSON.parse(payload);
+    email = p.email; name = p.name || ""; picture = p.picture || "";
+  } catch {
+    email = payload; // tolerate older plain-email cookies
+  }
   if (!email) return null;
   const role = await getRole(email);
   if (!role) return null; // access revoked
-  return { email, role };
+  return { email, role, name, picture };
 }
 
 export function allowedDomain() {

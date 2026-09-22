@@ -4,10 +4,15 @@ import { getRole } from "@/lib/store";
 
 export const dynamic = "force-dynamic";
 
-function decodeIdTokenEmail(idToken: string): string | null {
+function decodeIdToken(idToken: string): { email: string; name: string; picture: string } | null {
   try {
     const payload = JSON.parse(Buffer.from(idToken.split(".")[1], "base64url").toString("utf8"));
-    return payload.email_verified ? String(payload.email || "").toLowerCase() : null;
+    if (!payload.email_verified) return null;
+    return {
+      email: String(payload.email || "").toLowerCase(),
+      name: String(payload.name || ""),
+      picture: String(payload.picture || ""),
+    };
   } catch {
     return null;
   }
@@ -31,14 +36,14 @@ export async function GET(req: Request) {
     }),
   });
   const tok = await tokenRes.json().catch(() => ({}));
-  const email = tok.id_token ? decodeIdTokenEmail(tok.id_token) : null;
+  const profile = tok.id_token ? decodeIdToken(tok.id_token) : null;
 
-  if (!email || !emailAllowed(email)) {
+  if (!profile?.email || !emailAllowed(profile.email)) {
     return NextResponse.redirect(new URL("/login?error=domain", req.url));
   }
-  if (!(await getRole(email))) {
+  if (!(await getRole(profile.email))) {
     return NextResponse.redirect(new URL("/login?error=no_access", req.url));
   }
-  await setSession(email);
+  await setSession(profile.email, { name: profile.name, picture: profile.picture });
   return NextResponse.redirect(new URL("/portal", req.url));
 }

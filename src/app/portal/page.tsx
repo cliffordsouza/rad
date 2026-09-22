@@ -9,5 +9,13 @@ export default async function PortalPage() {
   const user = await getUser();
   if (!user) redirect("/login");
   const perms = PERMISSIONS[user.role];
-  return <Dashboard email={user.email} role={user.role} perms={perms} />;
+  return (
+    <Dashboard
+      email={user.email}
+      role={user.role}
+      perms={perms}
+      name={user.name || ""}
+      picture={user.picture || ""}
+    />
+  );
 }
