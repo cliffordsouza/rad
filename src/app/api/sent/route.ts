@@ -7,12 +7,12 @@ export const dynamic = "force-dynamic";
 
 export async function GET() {
   const user = await getUser();
-  if (!user || !can(user.email, "view_results")) {
+  if (!user || !(await can(user.email, "view_results"))) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
-  const polls = pollSummaries();
+  const polls = await pollSummaries();
   const byId = new Map(polls.map((p: any) => [p.id, p]));
-  const sent = getSent().map((s) => ({
+  const sent = (await getSent()).map((s) => ({
     ...s,
     poll: s.pollId ? byId.get(s.pollId) || null : null,
   }));

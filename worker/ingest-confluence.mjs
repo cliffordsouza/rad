@@ -13,6 +13,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { replaceChunks } from "./db.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -167,13 +168,12 @@ async function main() {
   };
   const outDir = path.join(ROOT, "data");
   fs.mkdirSync(outDir, { recursive: true });
-  const outFile = path.join(outDir, "confluence-index.json");
-  fs.writeFileSync(outFile, JSON.stringify(index));
+  fs.writeFileSync(path.join(outDir, "confluence-index.json"), JSON.stringify(index));
   const secs = ((Date.now() - started) / 1000).toFixed(0);
-  console.log(
-    `\nDone in ${secs}s: ${pageCount} pages, ${chunks.length} chunks across ${spaces.length} spaces.`
-  );
-  console.log(`Wrote ${outFile} (${(fs.statSync(outFile).size / 1024 / 1024).toFixed(1)} MB)`);
+  console.log(`\nDone in ${secs}s: ${pageCount} pages, ${chunks.length} chunks across ${spaces.length} spaces.`);
+  console.log("Writing chunks to Supabase...");
+  await replaceChunks(chunks);
+  console.log("Confluence index synced to Supabase.");
 }
 
 main().catch((e) => {

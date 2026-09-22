@@ -1,6 +1,4 @@
 import { NextResponse } from "next/server";
-import fs from "node:fs";
-import path from "node:path";
 import { WebClient } from "@slack/web-api";
 import { getUser } from "@/lib/session";
 import { can, getConfig } from "@/lib/store";
@@ -9,6 +7,7 @@ import { buildDailyPost } from "@/config/celebrations";
 import { startPulse } from "@worker/pulse.mjs";
 import { startTownhall } from "@worker/townhall.mjs";
 import { recipients as sharedRecipients } from "@worker/shared.mjs";
+import { getPeople } from "@worker/db.mjs";
 
 export const dynamic = "force-dynamic";
 
@@ -22,20 +21,18 @@ export async function POST(req: Request) {
   const { type } = await req.json().catch(() => ({}));
 
   if (type === "pulse" || type === "townhall") {
-    if (!can(user.email, "run_polls")) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    if (!(await can(user.email, "run_polls"))) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     const web = slack();
     const rec = await sharedRecipients(web);
     const res = type === "pulse" ? await startPulse(web, rec) : await startTownhall(web, rec);
-    return NextResponse.json({ ok: true, sent: res.sent, failed: res.failed, live: getConfig().postingEnabled });
+    return NextResponse.json({ ok: true, sent: res.sent, failed: res.failed, live: (await getConfig()).postingEnabled });
   }
 
   if (type === "celebration") {
-    if (!can(user.email, "trigger_posts")) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    if (!(await can(user.email, "trigger_posts"))) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     const web = slack();
-    const cfg = getConfig();
-    const people = JSON.parse(
-      fs.readFileSync(path.join(process.cwd(), "data", "people.json"), "utf8")
-    ) as PersonRecord[];
+    const cfg = await getConfig();
+    const people = (await getPeople()) as PersonRecord[];
     const today = todaysCelebrations(people);
 
     // Resolve Slack ids only for the few people celebrating today (for @mentions).

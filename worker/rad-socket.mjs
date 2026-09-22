@@ -24,8 +24,9 @@ import {
 import {
   startTownhall, onRate, results as townhallResults,
 } from "./townhall.mjs";
-import { adminEmails, postingEnabled, recipients as sharedRecipients } from "./shared.mjs";
+import { adminEmails, postingEnabled, recipients as sharedRecipients, refreshCache } from "./shared.mjs";
 import { onVote as onPollVote } from "./polls.mjs";
+import { getChunks, getPeople } from "./db.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -63,15 +64,13 @@ const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 // ---------------------------------------------------------------------------
 // Confluence (read-only, same scoping rules as src/lib/confluence.ts)
 // ---------------------------------------------------------------------------
-// Local index built by `npm run ingest` (data/confluence-index.json).
-let INDEX = { chunks: [], spaces: [], builtAt: null, pageCount: 0 };
-function loadIndex() {
-  const f = path.join(ROOT, "data", "confluence-index.json");
-  if (!fs.existsSync(f)) return;
+// Confluence index loaded from Supabase at boot (built by `npm run ingest`).
+let INDEX = { chunks: [] };
+async function loadIndex() {
   try {
-    INDEX = JSON.parse(fs.readFileSync(f, "utf8"));
+    INDEX = { chunks: await getChunks() };
   } catch (e) {
-    console.error("failed to read confluence index:", e.message);
+    console.error("failed to load confluence chunks:", e.message);
   }
 }
 
@@ -152,16 +151,11 @@ function retrieve(question, expanded) {
 // ---------------------------------------------------------------------------
 // People data (birthdays / anniversaries) - optional until the sheet is wired
 // ---------------------------------------------------------------------------
-function loadPeople() {
-  const f = path.join(ROOT, "data", "people.json");
-  if (!fs.existsSync(f)) return [];
-  try {
-    return JSON.parse(fs.readFileSync(f, "utf8"));
-  } catch {
-    return [];
-  }
+// People (birthdays / anniversaries) loaded from Supabase at boot + refresh.
+let PEOPLE = [];
+async function loadPeople() {
+  try { PEOPLE = await getPeople(); } catch (e) { console.error("failed to load people:", e.message); }
 }
-const PEOPLE = loadPeople();
 
 // ---------------------------------------------------------------------------
 // Roles + broadcast recipients (roles/config live in data/ via shared.mjs)
@@ -365,7 +359,7 @@ async function handle(event, { thread = false } = {}) {
       return;
     }
     if (PULSE_RESULTS_RE.test(text)) {
-      await web.chat.postMessage({ channel: event.channel, text: pulseResults() });
+      await web.chat.postMessage({ channel: event.channel, text: await pulseResults() });
       return;
     }
     if (TOWNHALL_START_RE.test(text)) {
@@ -379,7 +373,7 @@ async function handle(event, { thread = false } = {}) {
       return;
     }
     if (TOWNHALL_RESULTS_RE.test(text)) {
-      await web.chat.postMessage({ channel: event.channel, text: townhallResults() });
+      await web.chat.postMessage({ channel: event.channel, text: await townhallResults() });
       return;
     }
   }
@@ -423,8 +417,10 @@ async function handle(event, { thread = false } = {}) {
 // without Slack, to confirm answers before delivery is wired.
 async function cliAsk() {
   const q = process.argv.slice(3).join(" ").trim() || "How are you?";
-  loadIndex();
-  console.log(`(index: ${INDEX.chunkCount || INDEX.chunks.length || 0} chunks)`);
+  await refreshCache();
+  await loadIndex();
+  await loadPeople();
+  console.log(`(index: ${INDEX.chunks.length} chunks, people: ${PEOPLE.length})`);
   console.log(`Q: ${q}\n`);
   const a = await askRad(q);
   console.log(`Rad: ${a}`);
@@ -439,7 +435,9 @@ async function main() {
   BOT_USER_ID = auth.user_id;
   console.log(`Rad worker: bot=${auth.user} team=${auth.team}`);
 
-  loadIndex();
+  await refreshCache();
+  await loadIndex();
+  await loadPeople();
 
   // Resolve admin Slack ids (for pulse commands).
   for (const email of adminEmails()) {
@@ -447,10 +445,12 @@ async function main() {
     if (id) ADMIN_IDS.add(id);
   }
 
+  // Keep roles/config/people fresh so portal changes propagate to the worker.
+  setInterval(() => { refreshCache(); loadPeople(); }, 20000).unref();
+
   console.log(
-    `Confluence index: ${INDEX.chunks.length} chunks / ${INDEX.pageCount || "?"} pages` +
-    `${INDEX.builtAt ? ` (built ${INDEX.builtAt})` : " (MISSING - run npm run ingest)"}` +
-    ` | people: ${PEOPLE.length} | admins: ${ADMIN_IDS.size} | posting: ${postingEnabled() ? "LIVE" : "test"}`
+    `Confluence index: ${INDEX.chunks.length} chunks | people: ${PEOPLE.length} | ` +
+    `admins: ${ADMIN_IDS.size} | posting: ${postingEnabled() ? "LIVE" : "test"}`
   );
 
   const sm = new SocketModeClient({ appToken: APP_TOKEN });

@@ -1,15 +1,8 @@
 /**
- * Portal-side reader/writer for RAD's shared state (data/*.json).
- * Mirrors worker/shared.mjs - both read the same files, so portal edits take
- * effect in the worker live.
+ * Portal-side data access - now backed by Supabase via worker/db.mjs (shared
+ * with the worker). All functions are async.
  */
-import fs from "node:fs";
-import path from "node:path";
-
-const DATA = path.join(process.cwd(), "data");
-const ROLES = path.join(DATA, "roles.json");
-const CONFIG = path.join(DATA, "config.json");
-const SENT = path.join(DATA, "sent.json");
+import * as db from "@worker/db.mjs";
 
 export type RadRole = "admin" | "manager" | "viewer";
 export type RadPermission =
@@ -21,80 +14,51 @@ export const PERMISSIONS: Record<RadRole, RadPermission[]> = {
   viewer: ["view_results"],
 };
 
-function readJson<T>(file: string, fallback: T): T {
-  try {
-    return JSON.parse(fs.readFileSync(file, "utf8")) as T;
-  } catch {
-    return fallback;
-  }
-}
-function writeJson(file: string, data: unknown) {
-  fs.mkdirSync(path.dirname(file), { recursive: true });
-  fs.writeFileSync(file, JSON.stringify(data, null, 2));
-}
-
-// ---- Roles ----
 export type RolesMap = Record<string, RadRole>;
 
-export function getRoles(): RolesMap {
-  return readJson<RolesMap>(ROLES, {});
+export async function getRoles(): Promise<RolesMap> {
+  return (await db.getRoles()) as RolesMap;
 }
-export function saveRoles(roles: RolesMap) {
-  writeJson(ROLES, roles);
+export async function getRole(email: string): Promise<RadRole | null> {
+  const roles = await getRoles();
+  return roles[email.trim().toLowerCase()] ?? null;
 }
-export function getRole(email: string): RadRole | null {
-  return getRoles()[email.trim().toLowerCase()] ?? null;
-}
-export function can(email: string, perm: RadPermission): boolean {
-  const role = getRole(email);
+export async function can(email: string, perm: RadPermission): Promise<boolean> {
+  const role = await getRole(email);
   return role ? PERMISSIONS[role].includes(perm) : false;
 }
-export function setRole(email: string, role: RadRole) {
-  const roles = getRoles();
-  roles[email.trim().toLowerCase()] = role;
-  saveRoles(roles);
+export async function setRole(email: string, role: RadRole) {
+  await db.setRole(email, role);
 }
-export function removeRole(email: string) {
-  const roles = getRoles();
-  delete roles[email.trim().toLowerCase()];
-  saveRoles(roles);
+export async function removeRole(email: string) {
+  await db.removeRole(email);
 }
 
-// ---- Config ----
 export interface RadConfig {
   postingEnabled: boolean;
   socialChannel: string;
   testChannel: string;
 }
-export function getConfig(): RadConfig {
-  return readJson<RadConfig>(CONFIG, {
-    postingEnabled: false,
-    socialChannel: "#social",
-    testChannel: "#rad-test",
-  });
+export async function getConfig(): Promise<RadConfig> {
+  return db.getConfig();
 }
-export function saveConfig(patch: Partial<RadConfig>): RadConfig {
-  const cfg = { ...getConfig(), ...patch };
-  writeJson(CONFIG, cfg);
-  return cfg;
+export async function saveConfig(patch: Partial<RadConfig>): Promise<RadConfig> {
+  return db.saveConfig(patch);
 }
 
-// ---- Sent log ----
 export interface SentEntry {
   id: string;
   type: "message" | "poll" | "image";
-  channel: string; // display name (e.g. #rad-test)
+  channel: string;
   by: string;
   at: string;
   summary: string;
   pollId?: string;
   live: boolean;
 }
-export function getSent(): SentEntry[] {
-  return readJson<SentEntry[]>(SENT, []);
+export async function getSent(): Promise<SentEntry[]> {
+  return db.getSent();
 }
-export function appendSent(entry: SentEntry) {
-  const all = getSent();
-  all.unshift(entry);
-  writeJson(SENT, all.slice(0, 200));
+export async function appendSent(entry: SentEntry) {
+  await db.appendSent(entry);
 }

@@ -14,7 +14,7 @@ export async function POST(req: Request) {
   if (!emailAllowed(e)) {
     return NextResponse.json({ error: `Use an @${process.env.ALLOWED_EMAIL_DOMAIN || "radix.email"} email` }, { status: 400 });
   }
-  if (!getRole(e)) {
+  if (!(await getRole(e))) {
     return NextResponse.json({ error: "That email has no RAD access yet. Ask an admin to add you." }, { status: 403 });
   }
   await setSession(e);

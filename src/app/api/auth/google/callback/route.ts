@@ -36,7 +36,7 @@ export async function GET(req: Request) {
   if (!email || !emailAllowed(email)) {
     return NextResponse.redirect(new URL("/login?error=domain", req.url));
   }
-  if (!getRole(email)) {
+  if (!(await getRole(email))) {
     return NextResponse.redirect(new URL("/login?error=no_access", req.url));
   }
   await setSession(email);

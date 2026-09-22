@@ -62,7 +62,7 @@ export async function getUser(): Promise<RadUser | null> {
   if (!token) return null;
   const email = verify(token);
   if (!email) return null;
-  const role = getRole(email);
+  const role = await getRole(email);
   if (!role) return null; // access revoked
   return { email, role };
 }

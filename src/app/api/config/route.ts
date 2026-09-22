@@ -7,12 +7,12 @@ export const dynamic = "force-dynamic";
 export async function GET() {
   const user = await getUser();
   if (!user) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  return NextResponse.json({ config: getConfig() });
+  return NextResponse.json({ config: await getConfig() });
 }
 
 export async function POST(req: Request) {
   const user = await getUser();
-  if (!user || !can(user.email, "manage_config")) {
+  if (!user || !(await can(user.email, "manage_config"))) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
   const body = await req.json().catch(() => ({}));
@@ -20,6 +20,6 @@ export async function POST(req: Request) {
   if (typeof body.postingEnabled === "boolean") patch.postingEnabled = body.postingEnabled;
   if (typeof body.socialChannel === "string") patch.socialChannel = body.socialChannel;
   if (typeof body.testChannel === "string") patch.testChannel = body.testChannel;
-  const config = saveConfig(patch);
+  const config = await saveConfig(patch);
   return NextResponse.json({ ok: true, config });
 }

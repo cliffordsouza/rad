@@ -1,16 +1,5 @@
-/** Read + aggregate pulse and town-hall results for the portal. */
-import fs from "node:fs";
-import path from "node:path";
-
-const DATA = path.join(process.cwd(), "data");
-
-function readJson<T>(file: string, fallback: T): T {
-  try {
-    return JSON.parse(fs.readFileSync(path.join(DATA, file), "utf8")) as T;
-  } catch {
-    return fallback;
-  }
-}
+/** Read + aggregate pulse and town-hall results for the portal (from Supabase). */
+import * as db from "@worker/db.mjs";
 
 const TOWNHALL_POINTERS = [
   { key: "content", label: "Clarity of the updates shared" },
@@ -19,29 +8,31 @@ const TOWNHALL_POINTERS = [
   { key: "overall", label: "Overall value of the session" },
 ];
 
-export function pulseResults() {
-  const s = readJson<any>("pulse.json", { responses: [] });
-  const rs = (s.responses || []).filter((r: any) => r.pulseId === s.activePulseId);
+export async function pulseResults() {
+  const pulse = await db.getActivePulse();
+  if (!pulse) return { question: "How's your week going?", startedAt: null, count: 0, average: 0, distribution: [0, 0, 0, 0, 0], responses: [] };
+  const rs = await db.getPulseResponses(pulse.id);
   const dist = [1, 2, 3, 4, 5].map((n) => rs.filter((r: any) => r.score === n).length);
   const avg = rs.length ? rs.reduce((a: number, r: any) => a + r.score, 0) / rs.length : 0;
   return {
-    question: s.question || "How's your week going?",
-    startedAt: s.startedAt || null,
+    question: pulse.question || "How's your week going?",
+    startedAt: pulse.started_at || null,
     count: rs.length,
     average: Number(avg.toFixed(2)),
-    distribution: dist, // index 0 = score 1
+    distribution: dist,
     responses: rs.map((r: any) => ({ name: r.name, score: r.score, comment: r.comment || null })),
   };
 }
 
-export function townhallResults() {
-  const s = readJson<any>("townhall.json", { responses: [] });
-  const rs = (s.responses || []).filter((r: any) => r.surveyId === s.activeSurveyId);
-  const respondents = new Set(rs.map((r: any) => r.userId)).size;
+export async function townhallResults() {
+  const survey = await db.getActiveTownhall();
+  if (!survey) return { startedAt: null, respondents: 0, pointers: [] };
+  const rs = await db.getTownhallResponses(survey.id);
+  const respondents = new Set(rs.map((r: any) => r.user_id)).size;
   const pointers = TOWNHALL_POINTERS.map((p) => {
     const ratings = rs.filter((r: any) => r.key === p.key).map((r: any) => r.rating);
     const avg = ratings.length ? ratings.reduce((a: number, b: number) => a + b, 0) / ratings.length : 0;
     return { label: p.label, count: ratings.length, average: Number(avg.toFixed(2)) };
   });
-  return { startedAt: s.startedAt || null, respondents, pointers };
+  return { startedAt: survey.started_at || null, respondents, pointers };
 }

@@ -87,6 +87,10 @@ for (const p of people) {
 
 fs.writeFileSync(OUT, JSON.stringify(deduped, null, 2));
 console.log(`Parsed ${deduped.length} people (${noEmailCount} without an email, ${dupes} duplicate rows removed) -> ${OUT}`);
+
+const { replacePeople } = await import("./db.mjs");
+await replacePeople(deduped);
+console.log("People synced to Supabase.");
 if (skipped.length) {
   console.log(`\nSkipped ${skipped.length} numbered line(s) that didn't match:`);
   skipped.forEach((s) => console.log("  " + s));

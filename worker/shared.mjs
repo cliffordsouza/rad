@@ -1,127 +1,62 @@
 /**
- * Shared state for RAD - roles, config, and recipients.
- * Both the worker (worker/*.mjs) and the web portal (Next.js API routes) read
- * and write these files, so the portal can manage access + settings live
- * without restarting the worker.
+ * Shared roles/config/recipients for RAD, backed by Supabase (worker/db.mjs).
  *
- * Files (gitignored, under data/):
- *   roles.json  -> { "email": "admin" | "manager" | "viewer", ... }
- *   config.json -> { postingEnabled, socialChannel, testChannel }
+ * The worker keeps a small in-memory cache of roles + config (warmed at boot,
+ * refreshed periodically) so the hot Slack-handler path stays synchronous.
+ * The portal (serverless) calls the async DB helpers directly instead.
  */
-import fs from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
+import * as db from "./db.mjs";
 
-const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const ROLES_FILE = path.join(ROOT, "data", "roles.json");
-const CONFIG_FILE = path.join(ROOT, "data", "config.json");
-
-function readJson(file, fallback) {
-  try {
-    return JSON.parse(fs.readFileSync(file, "utf8"));
-  } catch {
-    return fallback;
-  }
-}
-function writeJson(file, data) {
-  fs.mkdirSync(path.dirname(file), { recursive: true });
-  fs.writeFileSync(file, JSON.stringify(data, null, 2));
-}
-
-// ---- Roles -----------------------------------------------------------------
-// Permissions per role.
 export const PERMISSIONS = {
   admin: ["manage_roles", "manage_config", "trigger_posts", "run_polls", "view_results"],
   manager: ["trigger_posts", "run_polls", "view_results"],
   viewer: ["view_results"],
 };
 
-/** Seed roles.json from env the first time, so nothing is lost on migration. */
-function seedRolesFromEnv() {
-  const roles = {};
-  for (const e of (process.env.RAD_ADMIN_EMAILS || "").split(",")) {
-    const k = e.trim().toLowerCase();
-    if (k) roles[k] = "admin";
-  }
-  for (const e of (process.env.RAD_MANAGER_EMAILS || "").split(",")) {
-    const k = e.trim().toLowerCase();
-    if (k && !roles[k]) roles[k] = "manager";
-  }
-  return roles;
-}
+let cache = {
+  roles: {},
+  config: { postingEnabled: false, socialChannel: "#social", testChannel: "#rad-test" },
+};
 
-export function loadRoles() {
-  let roles = readJson(ROLES_FILE, null);
-  if (!roles) {
-    roles = seedRolesFromEnv();
-    writeJson(ROLES_FILE, roles);
+/** Warm/refresh the worker cache from the DB. */
+export async function refreshCache() {
+  try {
+    cache.roles = await db.getRoles();
+    cache.config = await db.getConfig();
+  } catch (e) {
+    console.error("[shared] cache refresh failed:", e.message);
   }
-  return roles;
-}
-
-export function saveRoles(roles) {
-  writeJson(ROLES_FILE, roles);
 }
 
 export function roleOf(email) {
-  const roles = loadRoles();
-  return roles[(email || "").trim().toLowerCase()] || null;
+  return cache.roles[(email || "").trim().toLowerCase()] || null;
 }
-
 export function can(email, perm) {
   const role = roleOf(email);
   return role ? PERMISSIONS[role].includes(perm) : false;
 }
-
 export function adminEmails() {
-  const roles = loadRoles();
-  return Object.entries(roles).filter(([, r]) => r === "admin").map(([e]) => e);
+  return Object.entries(cache.roles).filter(([, r]) => r === "admin").map(([e]) => e);
 }
-
 export function privilegedEmails() {
-  const roles = loadRoles();
-  return Object.entries(roles)
-    .filter(([, r]) => r === "admin" || r === "manager")
-    .map(([e]) => e);
+  return Object.entries(cache.roles).filter(([, r]) => r === "admin" || r === "manager").map(([e]) => e);
 }
-
-// ---- Config ----------------------------------------------------------------
-export function loadConfig() {
-  const fallback = {
-    postingEnabled: process.env.POSTING_ENABLED === "true",
-    socialChannel: process.env.SLACK_SOCIAL_CHANNEL || "#social",
-    testChannel: process.env.SLACK_TEST_CHANNEL || "#rad-test",
-  };
-  const cfg = readJson(CONFIG_FILE, null);
-  if (!cfg) {
-    writeJson(CONFIG_FILE, fallback);
-    return fallback;
-  }
-  return { ...fallback, ...cfg };
-}
-
-export function saveConfig(patch) {
-  const cfg = { ...loadConfig(), ...patch };
-  writeJson(CONFIG_FILE, cfg);
-  return cfg;
-}
-
 export function postingEnabled() {
-  return loadConfig().postingEnabled === true;
+  return cache.config.postingEnabled === true;
+}
+export function cachedConfig() {
+  return cache.config;
 }
 
-// ---- Channels --------------------------------------------------------------
-/** Resolve a channel name (#rad-test) or id to a Slack channel id. */
+// ---- Channels ----
 export async function resolveChannel(web, nameOrId) {
   const v = (nameOrId || "").trim();
-  if (/^[CGD][A-Z0-9]{6,}$/.test(v)) return v; // already an id
+  if (/^[CGD][A-Z0-9]{6,}$/.test(v)) return v;
   const target = v.replace(/^#/, "").toLowerCase();
   let cursor;
   do {
     const res = await web.users.conversations({
-      types: "public_channel,private_channel",
-      limit: 200,
-      ...(cursor ? { cursor } : {}),
+      types: "public_channel,private_channel", limit: 200, ...(cursor ? { cursor } : {}),
     });
     if (!res.ok) break;
     const hit = (res.channels || []).find((c) => (c.name || "").toLowerCase() === target);
@@ -131,16 +66,11 @@ export async function resolveChannel(web, nameOrId) {
   return null;
 }
 
-// ---- Recipients ------------------------------------------------------------
-/**
- * Who receives a broadcast (pulse / town-hall / celebration DM). Test-safe:
- * only privileged users until go-live, then everyone in the people sheet.
- * Resolves Slack ids by email.
- */
+// ---- Recipients (reads DB directly so it works in worker AND serverless portal) ----
 export async function recipients(web) {
-  const people = readJson(path.join(ROOT, "data", "people.json"), []);
-  const live = postingEnabled();
-  const priv = privilegedEmails();
+  const [people, config, roles] = await Promise.all([db.getPeople(), db.getConfig(), db.getRoles()]);
+  const priv = Object.entries(roles).filter(([, r]) => r === "admin" || r === "manager").map(([e]) => e.toLowerCase());
+  const live = config.postingEnabled === true;
 
   const byEmail = new Map();
   for (const p of people) {
@@ -148,17 +78,14 @@ export async function recipients(web) {
     if (!e) continue;
     if (live || priv.includes(e)) byEmail.set(e, p);
   }
-  // In test mode, always include privileged users even if absent from the sheet.
-  if (!live) {
-    for (const e of priv) if (!byEmail.has(e)) byEmail.set(e, { name: e.split("@")[0], email: e });
-  }
+  if (!live) for (const e of priv) if (!byEmail.has(e)) byEmail.set(e, { name: e.split("@")[0], email: e });
 
   const out = [];
   for (const p of byEmail.values()) {
     try {
       const r = await web.users.lookupByEmail({ email: p.email });
       if (r.ok) out.push({ name: p.name, email: p.email, slackUserId: r.user.id });
-    } catch { /* skip unresolvable */ }
+    } catch { /* skip */ }
   }
   return out;
 }
