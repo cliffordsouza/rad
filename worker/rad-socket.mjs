@@ -40,6 +40,14 @@ function loadEnv() {
 }
 loadEnv();
 
+// Never die quietly. Log stray rejections but keep serving; on a fatal
+// exception, exit non-zero so the supervisor (launchd) restarts a clean process.
+process.on("unhandledRejection", (e) => console.error("[unhandledRejection]", e));
+process.on("uncaughtException", (e) => {
+  console.error("[uncaughtException]", e);
+  process.exit(1);
+});
+
 const BOT_TOKEN = process.env.SLACK_BOT_TOKEN;
 const APP_TOKEN = process.env.SLACK_APP_TOKEN;
 const MODEL = process.env.ANTHROPIC_MODEL || "claude-sonnet-5";
@@ -447,13 +455,31 @@ async function main() {
 
   const sm = new SocketModeClient({ appToken: APP_TOKEN });
 
+  // Connection lifecycle logging + watchdog (helps diagnose + auto-heal drops).
+  let lastConnectedAt = Date.now();
+  sm.on("connected", () => { lastConnectedAt = Date.now(); console.log("[socket] connected"); });
+  sm.on("disconnected", (e) => console.log("[socket] disconnected", e?.message || ""));
+  sm.on("reconnecting", () => console.log("[socket] reconnecting..."));
+
+  // If the socket stays down for >2 min despite the client's own reconnects,
+  // exit so launchd relaunches a fresh, definitely-connected process.
+  setInterval(() => {
+    const down = Date.now() - lastConnectedAt;
+    if (down > 120000) {
+      console.error(`[watchdog] socket down ${Math.round(down / 1000)}s - exiting for a clean restart`);
+      process.exit(1);
+    }
+  }, 30000).unref();
+
   sm.on("message", async ({ event, ack }) => {
     await ack();
+    console.log(`[msg] from=${event.user} type=${event.channel_type} subtype=${event.subtype || "-"} text=${JSON.stringify((event.text || "").slice(0, 60))}`);
     if (event.channel_type === "im") await handle(event, { thread: false });
   });
 
   sm.on("app_mention", async ({ event, ack }) => {
     await ack();
+    console.log(`[mention] from=${event.user} text=${JSON.stringify((event.text || "").slice(0, 60))}`);
     await handle(event, { thread: true });
   });
 
