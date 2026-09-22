@@ -26,46 +26,38 @@ export default function LoginForm({ devAuth, domain }: { devAuth: boolean; domai
   }
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
       <a
         href="/api/auth/google"
-        style={{
-          display: "block", textAlign: "center", padding: "12px 16px", borderRadius: 10,
-          background: "#fff", color: "#111", fontWeight: 600, textDecoration: "none",
-        }}
+        className="rad-btn"
+        style={{ justifyContent: "center", padding: "12px 16px" }}
       >
         Sign in with Google
       </a>
 
       {devAuth && (
         <>
-          <div style={{ textAlign: "center", color: "var(--muted)", fontSize: 12 }}>or dev sign-in (local)</div>
-          <form onSubmit={devLogin} style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, color: "var(--muted)", fontSize: 12 }}>
+            <span style={{ flex: 1, height: 1, background: "var(--border)" }} />
+            or dev sign-in (local)
+            <span style={{ flex: 1, height: 1, background: "var(--border)" }} />
+          </div>
+          <form onSubmit={devLogin} style={{ display: "flex", flexDirection: "column", gap: 10 }}>
             <input
+              className="rad-input"
               type="email"
               placeholder={`you@${domain}`}
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              style={{
-                padding: "10px 12px", borderRadius: 8, border: "1px solid var(--border)",
-                background: "var(--bg)", color: "var(--text)",
-              }}
             />
-            <button
-              type="submit"
-              disabled={busy}
-              style={{
-                padding: "10px 12px", borderRadius: 8, border: "none", cursor: "pointer",
-                background: "var(--accent)", color: "#fff", fontWeight: 600,
-              }}
-            >
+            <button type="submit" className="rad-btn rad-btn-ghost" disabled={busy} style={{ justifyContent: "center" }}>
               {busy ? "Signing in..." : "Dev sign in"}
             </button>
           </form>
         </>
       )}
 
-      {err && <div style={{ color: "#ff6b6b", fontSize: 13 }}>{err}</div>}
+      {err && <div style={{ color: "var(--danger)", fontSize: 13 }}>{err}</div>}
     </div>
   );
 }

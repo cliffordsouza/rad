@@ -2,31 +2,18 @@ import { RAD_PERSONA } from "@/config/persona";
 
 function StatusRow({ label, ok, note }: { label: string; ok: boolean; note: string }) {
   return (
-    <div
-      style={{
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "space-between",
-        padding: "14px 18px",
-        borderBottom: "1px solid var(--border)",
-      }}
-    >
+    <div style={{
+      display: "flex", alignItems: "center", justifyContent: "space-between",
+      padding: "14px 18px", borderBottom: "1px solid var(--border)",
+    }}>
       <div>
         <div style={{ fontWeight: 600 }}>{label}</div>
         <div style={{ color: "var(--muted)", fontSize: 13, marginTop: 2 }}>{note}</div>
       </div>
-      <span
-        style={{
-          fontSize: 12,
-          fontWeight: 700,
-          padding: "4px 10px",
-          borderRadius: 999,
-          background: ok ? "rgba(53,196,106,0.12)" : "rgba(232,176,75,0.12)",
-          color: ok ? "var(--ok)" : "var(--pending)",
-        }}
-      >
-        {ok ? "READY" : "PENDING"}
-      </span>
+      <span className="rad-pill" style={{
+        background: ok ? "var(--ok-weak)" : "var(--pending-weak)",
+        color: ok ? "var(--ok)" : "var(--pending)",
+      }}>{ok ? "Ready" : "Pending"}</span>
     </div>
   );
 }
@@ -35,70 +22,34 @@ export default function Home() {
   const has = (v?: string) => Boolean(v && v.length > 0);
 
   const checks = [
-    {
-      label: "Anthropic (Rad's brain)",
-      ok: has(process.env.ANTHROPIC_API_KEY),
-      note: "Powers conversational answers",
-    },
-    {
-      label: "Slack app",
-      ok: has(process.env.SLACK_BOT_TOKEN),
-      note: "Bot token for posting & DMs (Phase 1)",
-    },
-    {
-      label: "Confluence Cloud",
-      ok: has(process.env.CONFLUENCE_API_TOKEN),
-      note: process.env.CONFLUENCE_BASE_URL || "Not configured",
-    },
-    {
-      label: "Google Drive folder",
-      ok: has(process.env.GOOGLE_SERVICE_ACCOUNT_JSON),
-      note: "Context source (docs) - shared later",
-    },
-    {
-      label: "People sheet",
-      ok: has(process.env.GOOGLE_PEOPLE_SHEET_ID),
-      note: "Birthdays / anniversaries / joiners - shared later",
-    },
+    { label: "Anthropic (RAD's brain)", ok: has(process.env.ANTHROPIC_API_KEY), note: "Powers conversational answers" },
+    { label: "Slack app", ok: has(process.env.SLACK_BOT_TOKEN), note: "Bot token for posting & DMs" },
+    { label: "Confluence Cloud", ok: has(process.env.CONFLUENCE_API_TOKEN), note: process.env.CONFLUENCE_BASE_URL || "Not configured" },
+    { label: "Google Drive folder", ok: has(process.env.GOOGLE_SERVICE_ACCOUNT_JSON), note: "Context source (docs)" },
+    { label: "People sheet", ok: has(process.env.GOOGLE_PEOPLE_SHEET_ID), note: "Birthdays / anniversaries / joiners" },
   ];
 
   return (
     <main style={{ maxWidth: 640, margin: "0 auto", padding: "48px 20px" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 8 }}>
-        <div style={{ fontSize: 40 }}>{RAD_PERSONA.emoji}</div>
+        <img src="/brand/rad-avatar.png" alt="RAD" width={48} height={48} style={{ borderRadius: 12, boxShadow: "var(--shadow-sm)" }} />
         <div>
-          <h1 style={{ margin: 0, fontSize: 28 }}>Rad</h1>
+          <h1 style={{ margin: 0, fontSize: 28 }}>RAD</h1>
           <p style={{ margin: "4px 0 0", color: "var(--muted)" }}>{RAD_PERSONA.tagline}</p>
         </div>
       </div>
 
       <p style={{ color: "var(--muted)", fontSize: 14, lineHeight: 1.6, marginTop: 24 }}>
-        This is Rad&apos;s admin & status surface. The HR config portal (sources,
-        target channel, event toggles, tone) lands in Phase 5. For now, here&apos;s
-        what&apos;s wired up.
+        RAD&apos;s status surface. Manage notifications, polls and access in the portal.
       </p>
 
-      <div
-        style={{
-          marginTop: 24,
-          border: "1px solid var(--border)",
-          borderRadius: 14,
-          background: "var(--card)",
-          overflow: "hidden",
-        }}
-      >
+      <div className="rad-card" style={{ padding: 0, overflow: "hidden", marginTop: 20 }}>
         {checks.map((c) => (
           <StatusRow key={c.label} {...c} />
         ))}
       </div>
 
-      <a
-        href="/portal"
-        style={{
-          display: "inline-block", marginTop: 24, padding: "11px 18px", borderRadius: 10,
-          background: "var(--accent)", color: "#fff", fontWeight: 600, textDecoration: "none",
-        }}
-      >
+      <a href="/portal" className="rad-btn" style={{ marginTop: 24, padding: "12px 18px" }}>
         Open the RAD Portal →
       </a>
     </main>
