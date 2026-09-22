@@ -455,18 +455,24 @@ async function main() {
 
   const sm = new SocketModeClient({ appToken: APP_TOKEN });
 
-  // Connection lifecycle logging + watchdog (helps diagnose + auto-heal drops).
-  let lastConnectedAt = Date.now();
-  sm.on("connected", () => { lastConnectedAt = Date.now(); console.log("[socket] connected"); });
-  sm.on("disconnected", (e) => console.log("[socket] disconnected", e?.message || ""));
+  // Connection lifecycle logging + watchdog (auto-heal a genuinely stuck socket).
+  // A healthy connection emits "connected" once then stays quiet, so we track
+  // the CURRENT state and only bail when actually disconnected for a while.
+  let connected = false;
+  let disconnectedSince = null;
+  sm.on("connected", () => { connected = true; disconnectedSince = null; console.log("[socket] connected"); });
+  sm.on("disconnected", (e) => {
+    connected = false;
+    if (!disconnectedSince) disconnectedSince = Date.now();
+    console.log("[socket] disconnected", e?.message || "");
+  });
   sm.on("reconnecting", () => console.log("[socket] reconnecting..."));
 
-  // If the socket stays down for >2 min despite the client's own reconnects,
+  // If it stays disconnected for >3 min despite the client's own reconnects,
   // exit so launchd relaunches a fresh, definitely-connected process.
   setInterval(() => {
-    const down = Date.now() - lastConnectedAt;
-    if (down > 120000) {
-      console.error(`[watchdog] socket down ${Math.round(down / 1000)}s - exiting for a clean restart`);
+    if (!connected && disconnectedSince && Date.now() - disconnectedSince > 180000) {
+      console.error(`[watchdog] socket disconnected ${Math.round((Date.now() - disconnectedSince) / 1000)}s - exiting for a clean restart`);
       process.exit(1);
     }
   }, 30000).unref();
