@@ -110,6 +110,27 @@ export function postingEnabled() {
   return loadConfig().postingEnabled === true;
 }
 
+// ---- Channels --------------------------------------------------------------
+/** Resolve a channel name (#rad-test) or id to a Slack channel id. */
+export async function resolveChannel(web, nameOrId) {
+  const v = (nameOrId || "").trim();
+  if (/^[CGD][A-Z0-9]{6,}$/.test(v)) return v; // already an id
+  const target = v.replace(/^#/, "").toLowerCase();
+  let cursor;
+  do {
+    const res = await web.users.conversations({
+      types: "public_channel,private_channel",
+      limit: 200,
+      ...(cursor ? { cursor } : {}),
+    });
+    if (!res.ok) break;
+    const hit = (res.channels || []).find((c) => (c.name || "").toLowerCase() === target);
+    if (hit) return hit.id;
+    cursor = res.response_metadata?.next_cursor || "";
+  } while (cursor);
+  return null;
+}
+
 // ---- Recipients ------------------------------------------------------------
 /**
  * Who receives a broadcast (pulse / town-hall / celebration DM). Test-safe:

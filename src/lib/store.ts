@@ -9,6 +9,7 @@ import path from "node:path";
 const DATA = path.join(process.cwd(), "data");
 const ROLES = path.join(DATA, "roles.json");
 const CONFIG = path.join(DATA, "config.json");
+const SENT = path.join(DATA, "sent.json");
 
 export type RadRole = "admin" | "manager" | "viewer";
 export type RadPermission =
@@ -76,4 +77,24 @@ export function saveConfig(patch: Partial<RadConfig>): RadConfig {
   const cfg = { ...getConfig(), ...patch };
   writeJson(CONFIG, cfg);
   return cfg;
+}
+
+// ---- Sent log ----
+export interface SentEntry {
+  id: string;
+  type: "message" | "poll" | "image";
+  channel: string; // display name (e.g. #rad-test)
+  by: string;
+  at: string;
+  summary: string;
+  pollId?: string;
+  live: boolean;
+}
+export function getSent(): SentEntry[] {
+  return readJson<SentEntry[]>(SENT, []);
+}
+export function appendSent(entry: SentEntry) {
+  const all = getSent();
+  all.unshift(entry);
+  writeJson(SENT, all.slice(0, 200));
 }

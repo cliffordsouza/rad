@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import Compose from "./Compose";
+import Sent from "./Sent";
 
 type Perm = string;
 const has = (perms: Perm[], p: Perm) => perms.includes(p);
@@ -43,6 +45,7 @@ export default function Dashboard({ email, role, perms }: { email: string; role:
   const [toast, setToast] = useState("");
   const [newEmail, setNewEmail] = useState("");
   const [newRole, setNewRole] = useState("viewer");
+  const [sentKey, setSentKey] = useState(0);
 
   const flash = (m: string) => { setToast(m); setTimeout(() => setToast(""), 3500); };
 
@@ -151,6 +154,16 @@ export default function Dashboard({ email, role, perms }: { email: string; role:
         </Section>
       )}
 
+      {/* Compose */}
+      {(has(perms, "trigger_posts") || has(perms, "run_polls")) && (
+        <Compose
+          canMessage={has(perms, "trigger_posts")}
+          canPoll={has(perms, "run_polls")}
+          flash={flash}
+          onPosted={() => setSentKey((k) => k + 1)}
+        />
+      )}
+
       {/* Results */}
       {has(perms, "view_results") && (
         <Section title="Results" right={<button className="rad-btn rad-btn-ghost" onClick={loadAll}>Refresh</button>}>
@@ -186,6 +199,9 @@ export default function Dashboard({ email, role, perms }: { email: string; role:
           )}
         </Section>
       )}
+
+      {/* Sent history */}
+      {has(perms, "view_results") && <Sent refreshKey={sentKey} />}
 
       {/* Access */}
       {has(perms, "manage_roles") && (

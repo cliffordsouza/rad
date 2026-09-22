@@ -25,6 +25,7 @@ import {
   startTownhall, onRate, results as townhallResults,
 } from "./townhall.mjs";
 import { adminEmails, postingEnabled, recipients as sharedRecipients } from "./shared.mjs";
+import { onVote as onPollVote } from "./polls.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -464,6 +465,7 @@ async function main() {
       if (body?.type !== "block_actions") return;
       if (actionId.startsWith("pulse_mood_")) await onMood(web, body);
       else if (actionId.startsWith("th_")) await onRate(web, body);
+      else if (actionId.startsWith("gp_")) await onPollVote(web, body);
     } catch (e) {
       console.error("interactive error:", e.message);
     }
