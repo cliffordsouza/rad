@@ -1,0 +1,25 @@
+# Render Blueprint for RAD's always-on Slack worker.
+# New -> Blueprint -> connect cliffordsouza/rad -> Render reads this file.
+# Set the secret env vars (sync:false) in the Render dashboard when prompted.
+services:
+  - type: worker
+    name: rad-worker
+    runtime: node
+    plan: starter
+    region: singapore
+    buildCommand: npm install
+    startCommand: node worker/rad-socket.mjs
+    autoDeploy: true
+    envVars:
+      - key: SLACK_BOT_TOKEN
+        sync: false
+      - key: SLACK_APP_TOKEN
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: ANTHROPIC_MODEL
+        value: claude-sonnet-5
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_KEY
+        sync: false
